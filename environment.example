@@ -1,0 +1,20 @@
+# Bug Analysis Agent Configuration
+# Copy this to .env and fill in your actual values
+
+# OpenAI Configuration (required for GPT analysis)
+OPENAI_API_KEY=your_openai_api_key_here
+GPT_MODEL=gpt-4o
+
+# AWS Configuration (optional, for CloudWatch backend log correlation)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your_aws_access_key_here
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key_here
+CLOUDWATCH_LOG_GROUP=/aws/lambda/your-backend-service
+
+# Analysis Configuration
+DEFAULT_CONTEXT_LINES=10
+DEFAULT_TIME_WINDOW_MINUTES=10
+LOG_DOWNLOAD_TIMEOUT=30
+
+# Logging
+LOG_LEVEL=INFO 
