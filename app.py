@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional
 
 # API Configuration
 # API_BASE_URL = "http://localhost:8000"
-API_BASE_URL - "http://3.238.204.247:8000"
+API_BASE_URL = "http://3.238.204.247:8000"
 
 
 def check_api_health() -> bool:
