@@ -169,6 +169,16 @@ def main():
                 "log_url": "https://sekai-app-log.s3.us-east-1.amazonaws.com/Sekai_v1.32.1_prod_20250731T061902Z.log",
                 "env": "prod",
                 "feedback": "it's stupid how you developers still didn't fix the damn opening dialogue bug on a character that i would be creating as i would write words in the dialogue for the character and i would press save and i would jump off of the character creation onto the character creation screen and i would press back into the character creation and i would go to the opening dialogue and all the words would be deleted, this bug been going on for 1 year, get your asses onto fixing this dumbass bug! 🤬"
+            },
+            "Discover Page Black Screen - @Lucas": {
+                "username": "@Lucas",
+                "user_id": "111",
+                "platform": "iOS",
+                "os_version": "Version 18.5 (Build 22F76)",
+                "app_version": "1.32.1",
+                "log_url": "https://sekai-app-log.s3.us-east-1.amazonaws.com/Sekai_v1.32.1_prod_20250731T004151Z.log",
+                "env": "prod",
+                "feedback": "Lucky discover页在第二次打开app之后黑屏了 也没法刷新"
             }
         }
         
@@ -426,6 +436,7 @@ def main():
         - **UI Issues**: Real user report about follower icons and character generation problems
         - **Black Screen Issues**: User experiencing display problems with episodes and notifications
         - **Character Creation Bug**: User report about dialogue text being deleted during character creation
+        - **Discover Page Black Screen**: iOS user experiencing black screen on discover page after second app launch
         - **Custom Report**: Default template for creating your own analysis
         
         ### 📊 Features
