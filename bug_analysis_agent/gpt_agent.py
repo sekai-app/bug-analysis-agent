@@ -25,7 +25,7 @@ class GPTAgent:
         self.model = model
         
         # Initialize OpenAI client (will use OPENAI_API_KEY env var if api_key is None)
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key,base_url="https://yunwu.ai/v1")
         
         # Test the connection
         try:
@@ -67,8 +67,7 @@ class GPTAgent:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "system", "content": system_prompt + "\n" + user_prompt}
                 ],
                 temperature=0.1,  # Low temperature for consistent analysis
                 max_tokens=1500
