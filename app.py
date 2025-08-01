@@ -159,6 +159,16 @@ def main():
                 "log_url": "https://sekai-app-log.s3.us-east-1.amazonaws.com/Sekai_v1.32.1_prod_20250730T170424Z.log",
                 "env": "prod",
                 "feedback": "each time I finish an episode it turns into a black screen, I have my episodes but I can only see the if I click the arrow and then go back to my episode. My notifications is also a black screen, and then another problem with my episodes is that whenever I look at the episodes the numbers on the episodes are all wrong and they do fix themselves eventually but it's just annoying"
+            },
+            "Character Creation Bug - @Miles_Prower2007": {
+                "username": "@Miles_Prower2007",
+                "user_id": "1569384",
+                "platform": "Android",
+                "os_version": "BLU_G0771_V13.0.04.30_GENERIC 21-05-2025 12:04",
+                "app_version": "1.32.1",
+                "log_url": "https://sekai-app-log.s3.us-east-1.amazonaws.com/Sekai_v1.32.1_prod_20250731T061902Z.log",
+                "env": "prod",
+                "feedback": "it's stupid how you developers still didn't fix the damn opening dialogue bug on a character that i would be creating as i would write words in the dialogue for the character and i would press save and i would jump off of the character creation onto the character creation screen and i would press back into the character creation and i would go to the opening dialogue and all the words would be deleted, this bug been going on for 1 year, get your asses onto fixing this dumbass bug! 🤬"
             }
         }
         
@@ -415,6 +425,7 @@ def main():
         ### 📝 Available Sample Reports
         - **UI Issues**: Real user report about follower icons and character generation problems
         - **Black Screen Issues**: User experiencing display problems with episodes and notifications
+        - **Character Creation Bug**: User report about dialogue text being deleted during character creation
         - **Custom Report**: Default template for creating your own analysis
         
         ### 📊 Features
