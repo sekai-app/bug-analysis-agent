@@ -23,6 +23,12 @@ class Config:
     AWS_SECRET_ACCESS_KEY: Optional[str] = os.getenv('AWS_SECRET_ACCESS_KEY')
     CLOUDWATCH_LOG_GROUP: Optional[str] = os.getenv('CLOUDWATCH_LOG_GROUP')
     
+    # Webhook Configuration
+    WEBHOOK_URL: Optional[str] = os.getenv('WEBHOOK_URL')
+    WEBHOOK_TIMEOUT: int = int(os.getenv('WEBHOOK_TIMEOUT', '30'))
+    WEBHOOK_RETRIES: int = int(os.getenv('WEBHOOK_RETRIES', '3'))
+    WEBHOOK_ENABLED: bool = os.getenv('WEBHOOK_ENABLED', 'false').lower() == 'true'
+    
     # Analysis Configuration
     DEFAULT_CONTEXT_LINES: int = int(os.getenv('DEFAULT_CONTEXT_LINES', '10'))
     DEFAULT_TIME_WINDOW_MINUTES: int = int(os.getenv('DEFAULT_TIME_WINDOW_MINUTES', '120'))  # 24 hours
@@ -50,14 +56,21 @@ class Config:
         )
     
     @classmethod
+    def is_webhook_configured(cls) -> bool:
+        """Check if webhook is properly configured"""
+        return cls.WEBHOOK_ENABLED and cls.WEBHOOK_URL is not None
+    
+    @classmethod
     def get_summary(cls) -> dict:
         """Get configuration summary for debugging"""
         return {
             'openai_configured': cls.is_openai_configured(),
             'aws_configured': cls.is_aws_configured(),
+            'webhook_configured': cls.is_webhook_configured(),
             'gpt_model': cls.GPT_MODEL,
             'aws_region': cls.AWS_REGION,
             'cloudwatch_log_group': cls.CLOUDWATCH_LOG_GROUP,
+            'webhook_enabled': cls.WEBHOOK_ENABLED,
             'context_lines': cls.DEFAULT_CONTEXT_LINES,
             'time_window_minutes': cls.DEFAULT_TIME_WINDOW_MINUTES,
             'log_level': cls.LOG_LEVEL

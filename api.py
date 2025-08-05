@@ -17,6 +17,7 @@ import os
 
 from bug_analysis_agent.analyzer import BugAnalyzer
 from bug_analysis_agent.config import Config
+from bug_analysis_agent.webhook import WebhookSender
 
 
 # Request/Response Models
@@ -53,13 +54,14 @@ class HealthResponse(BaseModel):
 
 # Global analyzer instance
 analyzer = None
+webhook_sender = None
 analysis_jobs = {}  # Store analysis jobs by ID
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup analyzer"""
-    global analyzer
+    global analyzer, webhook_sender
     
     # Setup logging
     logging.basicConfig(
@@ -79,6 +81,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"Failed to initialize analyzer: {e}")
         analyzer = None
+    
+    # Initialize webhook sender
+    try:
+        webhook_sender = WebhookSender()
+        logging.info("Webhook sender initialized successfully")
+    except Exception as e:
+        logging.error(f"Failed to initialize webhook sender: {e}")
+        webhook_sender = None
     
     yield
     
@@ -111,14 +121,41 @@ async def get_health():
         raise HTTPException(status_code=503, detail="Analyzer not initialized")
     
     try:
-        health = analyzer.get_health_status()
+        # Get analyzer component health
+        health_status = analyzer.get_health_status()
+        
+        # Add webhook status
+        if webhook_sender:
+            health_status['webhook'] = 'ok' if webhook_sender.enabled else 'disabled'
+        else:
+            health_status['webhook'] = 'unavailable'
+        
         return HealthResponse(
-            status="healthy" if all(v == "ok" for v in health.values()) else "degraded",
-            components=health,
+            status="healthy",
+            components=health_status,
             timestamp=datetime.utcnow()
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
+
+
+@app.post("/webhook/test")
+async def test_webhook():
+    """Test webhook connectivity"""
+    if webhook_sender is None:
+        raise HTTPException(status_code=503, detail="Webhook sender not initialized")
+    
+    if not webhook_sender.enabled:
+        raise HTTPException(status_code=400, detail="Webhook not configured or disabled")
+    
+    try:
+        success = webhook_sender.test_webhook()
+        if success:
+            return {"status": "success", "message": "Webhook test successful"}
+        else:
+            return {"status": "failed", "message": "Webhook test failed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Webhook test error: {e}")
 
 
 @app.post("/analyze", response_model=AnalysisResponse)
@@ -150,6 +187,7 @@ async def analyze_sync(request: AnalysisRequest):
         raise HTTPException(status_code=503, detail="Analyzer not initialized")
     
     analysis_id = f"sync_{request.user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    created_at = datetime.utcnow()
     
     try:
         # Convert to dict for analyzer
@@ -175,22 +213,55 @@ async def analyze_sync(request: AnalysisRequest):
             )
             result = analyzer.format_analysis_summary(triage_report)
         
+        completed_at = datetime.utcnow()
+        
+        # Send webhook notification
+        if webhook_sender:
+            try:
+                webhook_sender.send_analysis_complete(
+                    analysis_id=analysis_id,
+                    status="completed",
+                    result=result,
+                    csv_file=csv_file_path,
+                    user_id=request.user_id,
+                    created_at=created_at,
+                    completed_at=completed_at
+                )
+            except Exception as e:
+                logging.warning(f"Failed to send webhook for analysis {analysis_id}: {e}")
+        
         return AnalysisResponse(
             analysis_id=analysis_id,
             status="completed",
             result=result,
             csv_file=csv_file_path,
-            created_at=datetime.utcnow(),
-            completed_at=datetime.utcnow()
+            created_at=created_at,
+            completed_at=completed_at
         )
         
     except Exception as e:
+        completed_at = datetime.utcnow()
+        
+        # Send webhook notification for failure
+        if webhook_sender:
+            try:
+                webhook_sender.send_analysis_complete(
+                    analysis_id=analysis_id,
+                    status="failed",
+                    error=str(e),
+                    user_id=request.user_id,
+                    created_at=created_at,
+                    completed_at=completed_at
+                )
+            except Exception as webhook_error:
+                logging.warning(f"Failed to send webhook for failed analysis {analysis_id}: {webhook_error}")
+        
         return AnalysisResponse(
             analysis_id=analysis_id,
             status="failed",
             error=str(e),
-            created_at=datetime.utcnow(),
-            completed_at=datetime.utcnow()
+            created_at=created_at,
+            completed_at=completed_at
         )
 
 
@@ -247,11 +318,40 @@ async def run_analysis(analysis_id: str, report_data: Dict[str, Any]):
         analysis_jobs[analysis_id].csv_file = csv_file_path
         analysis_jobs[analysis_id].completed_at = datetime.utcnow()
         
+        # Send webhook notification
+        if webhook_sender:
+            try:
+                webhook_sender.send_analysis_complete(
+                    analysis_id=analysis_id,
+                    status="completed",
+                    result=result,
+                    csv_file=csv_file_path,
+                    user_id=report_data.get('user_id'),
+                    created_at=analysis_jobs[analysis_id].created_at,
+                    completed_at=analysis_jobs[analysis_id].completed_at
+                )
+            except Exception as e:
+                logging.warning(f"Failed to send webhook for analysis {analysis_id}: {e}")
+        
     except Exception as e:
         # Update job with error
         analysis_jobs[analysis_id].status = "failed"
         analysis_jobs[analysis_id].error = str(e)
         analysis_jobs[analysis_id].completed_at = datetime.utcnow()
+        
+        # Send webhook notification for failure
+        if webhook_sender:
+            try:
+                webhook_sender.send_analysis_complete(
+                    analysis_id=analysis_id,
+                    status="failed",
+                    error=str(e),
+                    user_id=report_data.get('user_id'),
+                    created_at=analysis_jobs[analysis_id].created_at,
+                    completed_at=analysis_jobs[analysis_id].completed_at
+                )
+            except Exception as webhook_error:
+                logging.warning(f"Failed to send webhook for failed analysis {analysis_id}: {webhook_error}")
 
 
 @app.get("/download-csv/{filename}")

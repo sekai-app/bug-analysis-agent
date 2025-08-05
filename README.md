@@ -12,6 +12,7 @@ An intelligent system that automatically analyzes user feedback by correlating i
 - **🔗 Backend Correlation**: Links frontend errors with AWS CloudWatch backend logs
 - **🧠 AI-Powered Analysis**: Uses GPT-4o for root cause analysis and classification
 - **📊 Comprehensive Reporting**: Generates detailed triage reports with recommendations
+- **📡 Webhook Integration**: Sends analysis completion notifications to external systems
 - **🌐 Web Interface**: Modern Streamlit UI with FastAPI backend for easy access
 
 ## 🌐 Web Interface
@@ -295,6 +296,10 @@ TriageReport(
 | `AWS_ACCESS_KEY_ID` | AWS access key | None | No** |
 | `AWS_SECRET_ACCESS_KEY` | AWS secret key | None | No** |
 | `CLOUDWATCH_LOG_GROUP` | Default log group | None | No |
+| `WEBHOOK_ENABLED` | Enable webhook notifications | `false` | No |
+| `WEBHOOK_URL` | Webhook endpoint URL | None | No*** |
+| `WEBHOOK_TIMEOUT` | Webhook timeout (seconds) | `30` | No |
+| `WEBHOOK_RETRIES` | Number of retry attempts | `3` | No |
 | `DEFAULT_CONTEXT_LINES` | Context lines around errors | `10` | No |
 | `DEFAULT_TIME_WINDOW_MINUTES` | Backend correlation window | `2` | No |
 | `LOG_DOWNLOAD_TIMEOUT` | Download timeout (seconds) | `30` | No |
@@ -302,6 +307,79 @@ TriageReport(
 
 \* Required for GPT analysis. System will fall back to heuristic analysis if unavailable.  
 \*\* Uses AWS default credential chain if not provided.
+\*\*\* Required if `WEBHOOK_ENABLED=true`. Analysis completion notifications will be sent to this URL.
+
+### 📡 Webhook Integration
+
+The Bug Analysis Agent can send notifications to external systems when analysis is complete. This is useful for integrating with ticketing systems, dashboards, or other automation tools.
+
+#### Configuration
+
+```bash
+# Enable webhooks
+WEBHOOK_ENABLED=true
+WEBHOOK_URL=https://your-endpoint.com/analysis-complete
+WEBHOOK_TIMEOUT=30
+WEBHOOK_RETRIES=3
+```
+
+#### Webhook Payload
+
+When analysis completes, a POST request is sent with this payload:
+
+```json
+{
+  "event_type": "analysis_complete",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "analysis": {
+    "id": "analysis_user123_20240115_103000",
+    "status": "completed",
+    "user_id": "user123",
+    "created_at": "2024-01-15T10:28:00Z",
+    "completed_at": "2024-01-15T10:30:00Z",
+    "result": "📋 BUG ANALYSIS REPORT\n...",
+    "csv_file": "logs/log_correlations_user123_20240115_103000.csv"
+  }
+}
+```
+
+For failed analyses:
+
+```json
+{
+  "event_type": "analysis_complete",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "analysis": {
+    "id": "analysis_user123_20240115_103000",
+    "status": "failed",
+    "user_id": "user123",
+    "created_at": "2024-01-15T10:28:00Z",
+    "completed_at": "2024-01-15T10:30:00Z",
+    "error": "Log download failed: HTTP 404"
+  }
+}
+```
+
+#### Testing Webhooks
+
+Test webhook connectivity:
+
+```bash
+# Test webhook endpoint
+curl -X POST http://localhost:8000/webhook/test
+
+# Check webhook status in health check
+curl http://localhost:8000/health
+```
+
+Use the test script for comprehensive testing:
+
+```bash
+# Run webhook integration test
+python test/test_webhook.py
+```
+
+This script starts a local webhook receiver and tests the complete flow.
 
 ### Error Patterns
 

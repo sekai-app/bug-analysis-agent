@@ -11,6 +11,12 @@ AWS_ACCESS_KEY_ID=your_aws_access_key_here
 AWS_SECRET_ACCESS_KEY=your_aws_secret_key_here
 CLOUDWATCH_LOG_GROUP=/aws/lambda/your-backend-service
 
+# Webhook Configuration (optional, for sending analysis results)
+WEBHOOK_ENABLED=false
+WEBHOOK_URL=https://your-webhook-endpoint.com/analysis-complete
+WEBHOOK_TIMEOUT=30
+WEBHOOK_RETRIES=3
+
 # Analysis Configuration
 DEFAULT_CONTEXT_LINES=10
 DEFAULT_TIME_WINDOW_MINUTES=10
