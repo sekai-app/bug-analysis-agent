@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class LogDownloader:
     """Downloads frontend logs from S3 URLs"""
     
-    def __init__(self, timeout: int = 30):
+    def __init__(self, timeout: int = 120):
         self.timeout = timeout
         self.session = requests.Session()
         

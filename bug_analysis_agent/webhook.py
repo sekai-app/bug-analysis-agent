@@ -54,7 +54,8 @@ class WebhookSender:
         user_id: Optional[str] = None,
         created_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        original_content: Optional[str] = None
     ) -> bool:
         """
         Send analysis completion notification to webhook
@@ -69,6 +70,7 @@ class WebhookSender:
             created_at: Analysis creation timestamp
             completed_at: Analysis completion timestamp
             metadata: Additional metadata to include
+            original_content: Original content from Lark submission (for Lark webhooks)
             
         Returns:
             True if webhook sent successfully, False otherwise
@@ -88,7 +90,8 @@ class WebhookSender:
                     user_id=user_id,
                     created_at=created_at,
                     completed_at=completed_at,
-                    metadata=metadata
+                    metadata=metadata,
+                    original_content=original_content
                 )
             else:
                 payload = self._build_generic_payload(
@@ -100,7 +103,8 @@ class WebhookSender:
                     user_id=user_id,
                     created_at=created_at,
                     completed_at=completed_at,
-                    metadata=metadata
+                    metadata=metadata,
+                    original_content=original_content
                 )
             
             success = self._send_with_retry(payload)
@@ -126,7 +130,8 @@ class WebhookSender:
         user_id: Optional[str] = None,
         created_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        original_content: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Build Lark-specific webhook payload
@@ -134,30 +139,37 @@ class WebhookSender:
         Returns:
             Dictionary containing Lark webhook payload
         """
-        # Format message for Lark
-        status_emoji = "✅" if status == "completed" else "❌"
-        message_lines = [
-            f"{status_emoji} Bug Analysis {status.title()}",
+        message_lines = []
+        
+        # Start with original content if available (for Lark webhook reports)
+        if original_content:
+            message_lines.extend([
+                original_content,
+                "",
+                "=" * 40,
+                ""
+            ])
+        
+        # Add analysis results section
+        status_text = "完成" if status == "completed" else "失败"
+        message_lines.extend([
+            f"用户日志 分析{status_text}!",
             "",
-            f"📋 Analysis ID: {analysis_id}",
-            f"👤 User: {user_id or 'N/A'}",
-            f"📊 Status: {status}",
-            f"⏰ Completed: {completed_at.strftime('%Y-%m-%d %H:%M:%S UTC') if completed_at else 'N/A'}",
+            f"分析ID: {analysis_id}",
+            f"完成时间: {completed_at.strftime('%Y-%m-%d %H:%M:%S UTC') if completed_at else 'N/A'}",
             ""
-        ]
+        ])
         
         if status == "completed" and result:
-            # Truncate long results for Lark (to avoid message limits)
-            summary_result = result[:500] + "..." if len(result) > 500 else result
-            message_lines.append(f"📝 Summary:\n{summary_result}")
+            # Send complete analysis results without truncation
+            message_lines.append(f"分析结果:\n{result}")
             
             if csv_file:
-                message_lines.append(f"\n📄 CSV Report: {csv_file}")
+                message_lines.append(f"\nCSV报告: {csv_file}")
         
         elif status == "failed" and error:
-            # Truncate long errors
-            summary_error = error[:300] + "..." if len(error) > 300 else error
-            message_lines.append(f"❌ Error:\n{summary_error}")
+            # Send complete error message without truncation
+            message_lines.append(f"错误信息:\n{error}")
         
         message_text = "\n".join(message_lines)
         
@@ -178,7 +190,8 @@ class WebhookSender:
         user_id: Optional[str] = None,
         created_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        original_content: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Build generic webhook payload (original format)

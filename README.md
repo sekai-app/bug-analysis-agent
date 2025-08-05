@@ -311,9 +311,13 @@ TriageReport(
 
 ### 📡 Webhook Integration
 
-The Bug Analysis Agent can send notifications to external systems when analysis is complete. This is useful for integrating with ticketing systems, dashboards, or other automation tools.
+The Bug Analysis Agent supports both **outgoing** and **incoming** webhooks for comprehensive integration with external systems.
 
-#### Configuration
+#### 🚀 Outgoing Webhooks (Analysis Results)
+
+The system can send notifications to external systems when analysis is complete. This is useful for integrating with ticketing systems, dashboards, or other automation tools.
+
+##### Configuration
 
 ```bash
 # Enable webhooks
@@ -323,7 +327,7 @@ WEBHOOK_TIMEOUT=30
 WEBHOOK_RETRIES=3
 ```
 
-#### Webhook Payload
+##### Webhook Payload
 
 When analysis completes, a POST request is sent with this payload:
 
@@ -343,22 +347,112 @@ When analysis completes, a POST request is sent with this payload:
 }
 ```
 
-For failed analyses:
+For **Lark/Feishu webhooks**, the system automatically detects Lark URLs and formats messages appropriately:
 
 ```json
 {
-  "event_type": "analysis_complete",
-  "timestamp": "2024-01-15T10:30:00Z",
-  "analysis": {
-    "id": "analysis_user123_20240115_103000",
-    "status": "failed",
-    "user_id": "user123",
-    "created_at": "2024-01-15T10:28:00Z",
-    "completed_at": "2024-01-15T10:30:00Z",
-    "error": "Log download failed: HTTP 404"
+  "msg_type": "text",
+  "content": {
+    "text": "✅ Bug Analysis Completed\n\n📋 Analysis ID: analysis_123\n👤 User: user123\n📊 Status: completed\n⏰ Completed: 2024-01-15 10:30:00 UTC\n\n📝 Summary:\nAnalysis results here..."
   }
 }
 ```
+
+#### 📥 Incoming Webhooks (Lark Reports)
+
+The system can also **receive** webhook calls from external systems to trigger analysis. This is particularly useful for Lark/Feishu bots that can send log reports directly.
+
+##### Endpoint
+
+```
+POST /webhook/lark
+```
+
+##### Expected Payload Format
+
+Send Lark interactive card payloads in this format:
+
+```json
+{
+  "msg_type": "interactive",
+  "card": {
+    "config": {
+      "wide_screen_mode": true
+    },
+    "header": {
+      "title": {
+        "tag": "plain_text", 
+        "content": "Sekai 日志上报"
+      }
+    },
+    "elements": [
+      {
+        "tag": "div",
+        "text": {
+          "tag": "lark_md", 
+          "content": "用户提交日志! \n下载地址: https://sekai-app-log.s3.us-east-1.amazonaws.com/filename.log \n环境: stage\n版本号: 1.0.0\n上传用户: user123 @username \n 系统：ios \n系统版本：iOS 16.0\n\n反馈内容: User's actual feedback text here\n"
+        }
+      }
+    ]
+  }
+}
+```
+
+The system will automatically:
+1. **Parse** the Lark card content to extract user details, log URLs, and feedback
+2. **Trigger** the analysis pipeline with the extracted data
+3. **Respond** with a formatted Lark card confirming the analysis has started
+4. **Send** analysis results to your configured webhook when complete
+
+##### Response Format
+
+Success response:
+```json
+{
+  "msg_type": "interactive",
+  "card": {
+    "header": {
+      "title": {
+        "tag": "plain_text",
+        "content": "日志分析 - 已提交"
+      }
+    },
+    "elements": [
+      {
+        "tag": "div",
+        "text": {
+          "tag": "lark_md",
+          "content": "✅ **分析已提交成功**\n\n📋 分析ID: `lark_user123_20240115_103000`\n⏰ 状态: 正在处理中\n\n分析完成后将通过webhook通知结果。"
+        }
+      }
+    ]
+  }
+}
+```
+
+##### Testing Incoming Webhooks
+
+Test the incoming webhook functionality:
+
+```bash
+# Test incoming webhook endpoint
+python test_lark_incoming_webhook.py
+```
+
+This script tests:
+- ✅ Valid Lark payload parsing
+- ✅ Invalid payload error handling  
+- ✅ Analysis pipeline triggering
+- ✅ Lark response formatting
+
+##### Integration Example
+
+Your Lark bot can POST log reports directly to:
+```
+http://your-server:8000/webhook/lark
+```
+
+The analysis will run automatically and results will be sent to your configured outgoing webhook URL.
 
 #### Testing Webhooks
 

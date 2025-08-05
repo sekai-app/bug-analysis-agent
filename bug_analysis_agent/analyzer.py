@@ -3,8 +3,10 @@ BugAnalyzer - Main orchestrator for the User Review-Driven Log Triage & Analysis
 """
 
 import csv
+import json
 import logging
 import os
+import boto3
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from .models import UserReport, TriageReport, LogError, BackendLogEntry
@@ -12,6 +14,7 @@ from .downloader import LogDownloader
 from .scanner import LogScanner
 from .cloudwatch import CloudWatchFinder
 from .gpt_agent import GPTAgent
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -206,40 +209,40 @@ class BugAnalyzer:
         analysis = triage_report.analysis
         
         summary = f"""
-📋 BUG ANALYSIS REPORT
+BUG分析报告
 {'='*50}
 
-🗣️ User Feedback: "{report.feedback}"
-👤 User: {report.username} (ID: {report.user_id})
-📱 Platform: {report.platform} - {report.os_version}
-🔧 App Version: {report.app_version}
-🌍 Environment: {report.env}
+用户反馈: "{report.feedback}"
+用户: {report.username} (ID: {report.user_id})
+平台: {report.platform} - {report.os_version}
+App版本: {report.app_version}
+环境: {report.env}
 
-📊 ANALYSIS RESULTS
+分析结果
 {'='*50}
 
-🎯 Issue Type: {analysis.issue_type.upper()}
-🎲 Confidence: {analysis.confidence:.1%}
+问题类型: {analysis.issue_type.upper()}
+置信度: {analysis.confidence:.1%}
 
-📝 Summary: {analysis.summary}
+总结: {analysis.summary}
 """
         
         if analysis.root_cause:
-            summary += f"\n🔍 Root Cause: {analysis.root_cause}"
+            summary += f"\n根本原因: {analysis.root_cause}"
         
         if analysis.related_limitations:
-            summary += f"\n⚠️ Technical Limitations: {analysis.related_limitations}"
+            summary += f"\n技术限制: {analysis.related_limitations}"
         
-        summary += f"\n\n💡 RECOMMENDATIONS\n{'-'*30}\n"
+        summary += f"\n\n建议方案\n{'-'*30}\n"
         for i, rec in enumerate(analysis.recommendations, 1):
             summary += f"{i}. {rec}\n"
         
-        summary += f"\n📊 LOG SUMMARY\n{'-'*30}\n"
-        summary += f"Frontend Errors: {len(triage_report.frontend_errors)}\n"
-        summary += f"Backend Logs: {len(triage_report.backend_logs)}\n"
+        summary += f"\n日志汇总\n{'-'*30}\n"
+        summary += f"前端错误: {len(triage_report.frontend_errors)}\n"
+        summary += f"后端日志: {len(triage_report.backend_logs)}\n"
         
         if triage_report.frontend_errors:
-            summary += f"\n🚨 TOP ERRORS\n{'-'*20}\n"
+            summary += f"\n前端错误详情\n{'-'*20}\n"
             for i, error in enumerate(triage_report.frontend_errors[:3], 1):
                 summary += f"{i}. {error.error_type} (Line {error.line_number})\n"
                 
@@ -253,9 +256,186 @@ class BugAnalyzer:
                     # Fallback for backward compatibility
                     summary += f"   Request ID: {error.request_id}\n"
         
-        summary += f"\n⏰ Processed: {triage_report.processed_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        summary += f"\n处理时间: {triage_report.processed_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
         
         return summary
+    
+    def format_concise_analysis(self, triage_report: TriageReport) -> str:
+        """
+        Format a concise analysis summary without user details (for webhooks with original content)
+        
+        Args:
+            triage_report: Complete triage report
+            
+        Returns:
+            Concise analysis summary string without redundant user info
+        """
+        analysis = triage_report.analysis
+        
+        summary = f"""问题类型: {analysis.issue_type.upper()}
+置信度: {analysis.confidence:.1%}
+
+总结: {analysis.summary}"""
+        
+        if analysis.root_cause:
+            summary += f"\n\n根本原因: {analysis.root_cause}"
+        
+        if analysis.related_limitations:
+            summary += f"\n\n技术限制: {analysis.related_limitations}"
+        
+        summary += f"\n\n建议方案\n{'-'*30}\n"
+        for i, rec in enumerate(analysis.recommendations, 1):
+            summary += f"{i}. {rec}\n"
+        
+        summary += f"\n日志汇总\n{'-'*30}\n"
+        summary += f"前端错误: {len(triage_report.frontend_errors)}\n"
+        summary += f"后端日志: {len(triage_report.backend_logs)}\n"
+        
+        if triage_report.frontend_errors:
+            summary += f"\n前端错误详情:\n"
+            for i, error in enumerate(triage_report.frontend_errors[:5], 1):  # Show first 3 errors
+                summary += f"{i}. {error.error_type}: {error.log_segment[:150]}...\n"
+        
+        return summary
+    
+    def _upload_csv_data_to_s3(self, csv_data: str, user_id: str) -> str:
+        """
+        Upload CSV data directly to S3 and return the S3 URL
+        
+        Args:
+            csv_data: CSV content as string
+            user_id: User ID for organizing files in S3
+            
+        Returns:
+            S3 URL of the uploaded file
+        """
+        try:
+            # Initialize S3 client
+            s3 = boto3.client(
+                "s3", 
+                aws_access_key_id=Config.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=Config.AWS_SECRET_ACCESS_KEY,
+                region_name=Config.AWS_REGION
+            )
+            
+            # Ensure bucket exists and has proper public access
+            self._ensure_s3_bucket_public_access(s3)
+            
+            # Generate S3 key with timestamp and user_id
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            s3_key = f"reports/{user_id}/{timestamp}_log_correlations_{user_id}_{timestamp}.csv"
+            
+            # Upload CSV data directly to S3 (public access controlled by bucket policy)
+            s3.put_object(
+                Bucket=Config.S3_BUCKET_NAME,
+                Key=s3_key,
+                Body=csv_data.encode('utf-8'),
+                ContentType='text/csv'
+            )
+            
+            # Construct S3 URL
+            s3_url = f"https://{Config.S3_BUCKET_NAME}.s3.{Config.AWS_REGION}.amazonaws.com/{s3_key}"
+            
+            logger.info(f"✅ CSV data uploaded to S3: {s3_url}")
+            return s3_url
+            
+        except Exception as e:
+            logger.error(f"Failed to upload CSV data to S3: {e}")
+            raise
+    
+    def _save_csv_locally(self, csv_data: str, user_id: str) -> str:
+        """
+        Save CSV data locally as fallback when S3 is not available
+        
+        Args:
+            csv_data: CSV content as string
+            user_id: User ID for file naming
+            
+        Returns:
+            Path to the saved local file
+        """
+        try:
+            # Create logs directory if it doesn't exist
+            logs_dir = "logs"
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"log_correlations_{user_id}_{timestamp}.csv"
+            file_path = os.path.join(logs_dir, filename)
+            
+            # Write CSV data to file
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(csv_data)
+            
+            logger.info(f"✅ CSV saved locally: {file_path}")
+            return file_path
+            
+        except Exception as e:
+            logger.error(f"Failed to save CSV locally: {e}")
+            raise
+    
+    def _ensure_s3_bucket_public_access(self, s3_client):
+        """
+        Ensure S3 bucket exists and has proper public access for CSV files
+        
+        Args:
+            s3_client: Boto3 S3 client
+        """
+        try:
+            # Check if bucket exists
+            try:
+                s3_client.head_bucket(Bucket=Config.S3_BUCKET_NAME)
+                logger.info(f"S3 bucket {Config.S3_BUCKET_NAME} exists")
+            except s3_client.exceptions.NoSuchBucket:
+                # Create bucket if it doesn't exist
+                s3_client.create_bucket(
+                    Bucket=Config.S3_BUCKET_NAME,
+                    CreateBucketConfiguration={'LocationConstraint': Config.AWS_REGION}
+                )
+                logger.info(f"Created S3 bucket {Config.S3_BUCKET_NAME}")
+            
+            # Disable block public access settings
+            try:
+                s3_client.put_public_access_block(
+                    Bucket=Config.S3_BUCKET_NAME,
+                    PublicAccessBlockConfiguration={
+                        'BlockPublicAcls': False,
+                        'IgnorePublicAcls': False,
+                        'BlockPublicPolicy': False,
+                        'RestrictPublicBuckets': False
+                    }
+                )
+                logger.info(f"Disabled block public access for bucket {Config.S3_BUCKET_NAME}")
+            except Exception as e:
+                logger.warning(f"Could not disable block public access (may already be disabled): {e}")
+            
+            # Set bucket policy to allow public read access for CSV files
+            bucket_policy = {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Sid": "PublicReadGetObject",
+                        "Effect": "Allow",
+                        "Principal": "*",
+                        "Action": "s3:GetObject",
+                        "Resource": f"arn:aws:s3:::{Config.S3_BUCKET_NAME}/reports/*"
+                    }
+                ]
+            }
+            
+            try:
+                s3_client.put_bucket_policy(
+                    Bucket=Config.S3_BUCKET_NAME,
+                    Policy=json.dumps(bucket_policy)
+                )
+                logger.info(f"Set public read policy for CSV files in bucket {Config.S3_BUCKET_NAME}")
+            except Exception as e:
+                logger.warning(f"Could not set bucket policy (may already be set): {e}")
+                
+        except Exception as e:
+            logger.warning(f"Could not ensure bucket public access: {e}")
+            # Continue anyway - the upload might still work
     
     def export_correlations_to_csv(
         self, 
@@ -264,7 +444,7 @@ class BugAnalyzer:
         global_deduplication: bool = True
     ) -> str:
         """
-        Export frontend-backend log correlations to CSV
+        Export frontend-backend log correlations to CSV and upload to S3
         
         Args:
             triage_report: Complete triage report
@@ -272,21 +452,8 @@ class BugAnalyzer:
             global_deduplication: If True, deduplicate backend messages globally across all frontend errors
             
         Returns:
-            Path to the generated CSV file
+            S3 URL of the uploaded CSV file, or local path if S3 upload fails
         """
-        
-        # Create logs directory if it doesn't exist
-        logs_dir = "logs"
-        os.makedirs(logs_dir, exist_ok=True)
-        
-        if output_file is None:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            user_id = triage_report.user_report.user_id
-            output_file = os.path.join(logs_dir, f"log_correlations_{user_id}_{timestamp}.csv")
-        else:
-            # If output_file is provided, ensure it's in the logs directory
-            if not output_file.startswith(logs_dir):
-                output_file = os.path.join(logs_dir, os.path.basename(output_file))
         
         # Create correlation mappings with optional global deduplication
         correlations = self._create_correlation_mappings(
@@ -295,32 +462,55 @@ class BugAnalyzer:
             global_deduplication=global_deduplication
         )
         
-        # Write CSV
-        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = [
-                'frontend_line_number',
-                'frontend_timestamp', 
-                'frontend_error_type',
-                'frontend_message',
-                'frontend_request_ids',  # All request_ids found in context
-                'backend_timestamp',
-                'backend_message',
-                'backend_log_group',
-                'backend_log_stream',
-                'backend_request_id',
-                'matched_request_id',  # Which specific request_id was matched
-                'correlation_method',
-                'time_diff_seconds'
-            ]
-            
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
-            
-            for correlation in correlations:
-                writer.writerow(correlation)
+        # Generate CSV content in memory
+        csv_content = []
+        fieldnames = [
+            'frontend_line_number',
+            'frontend_timestamp', 
+            'frontend_error_type',
+            'frontend_message',
+            'frontend_request_ids',  # All request_ids found in context
+            'backend_timestamp',
+            'backend_message',
+            'backend_log_group',
+            'backend_log_stream',
+            'backend_request_id',
+            'matched_request_id',  # Which specific request_id was matched
+            'correlation_method',
+            'time_diff_seconds'
+        ]
         
-        logger.info(f"Exported {len(correlations)} log correlations to {output_file}")
-        return output_file
+        # Add header
+        csv_content.append(','.join(fieldnames))
+        
+        # Add data rows
+        for correlation in correlations:
+            row = []
+            for field in fieldnames:
+                value = correlation.get(field, '')
+                # Escape commas and quotes in CSV
+                if ',' in str(value) or '"' in str(value):
+                    value = f'"{str(value).replace('"', '""')}"'
+                row.append(str(value))
+            csv_content.append(','.join(row))
+        
+        csv_data = '\n'.join(csv_content)
+        
+        logger.info(f"Generated CSV with {len(correlations)} log correlations")
+        
+        # Upload to S3 if configured
+        if Config.is_s3_configured():
+            try:
+                s3_url = self._upload_csv_data_to_s3(csv_data, triage_report.user_report.user_id)
+                logger.info(f"CSV uploaded to S3: {s3_url}")
+                return s3_url
+            except Exception as e:
+                logger.warning(f"Failed to upload CSV to S3: {e}")
+                # Fallback to local file if S3 fails
+                return self._save_csv_locally(csv_data, triage_report.user_report.user_id)
+        else:
+            # Save locally if S3 not configured
+            return self._save_csv_locally(csv_data, triage_report.user_report.user_id)
     
     def _create_correlation_mappings(
         self, 

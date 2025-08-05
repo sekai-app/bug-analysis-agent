@@ -121,43 +121,43 @@ class GPTAgent:
                 })
         
         context = f"""
-🗣️ User Review: "{user_report.feedback}"
-📱 User ID: {user_report.user_id}, Platform: {user_report.platform}, App v{user_report.app_version}
-🌍 Environment: {user_report.env}
-💻 OS Version: {user_report.os_version}
+用户评价: "{user_report.feedback}"
+用户ID: {user_report.user_id}, 平台: {user_report.platform}, App版本: v{user_report.app_version}
+环境: {user_report.env}
+操作系统版本: {user_report.os_version}
 
-🧾 Log Correlation Summary:
-- Total frontend errors: {len(frontend_errors)}
-- Errors with backend correlation: {correlations_with_backend}
-- Errors without backend correlation: {no_correlations}
+日志关联汇总:
+- 前端错误总数: {len(frontend_errors)}
+- 有后端关联的错误: {correlations_with_backend}
+- 无后端关联的错误: {no_correlations}
 """
         
         # Add frontend errors with their backend correlations
         if frontend_errors:
-            context += "\n📦 Frontend-Backend Log Correlations:\n"
+            context += "\n前端-后端日志关联:\n"
             for i, (line_num, error_info) in enumerate(frontend_errors.items(), 1):
-                context += f"\n🔍 Error {i} (Line {line_num}) - {error_info['error_type']}:\n"
+                context += f"\n错误 {i} (第{line_num}行) - {error_info['error_type']}:\n"
                 
                 if error_info['timestamp']:
-                    context += f"Frontend Timestamp: {error_info['timestamp']}\n"
+                    context += f"前端时间戳: {error_info['timestamp']}\n"
                 if error_info['request_ids']:
-                    context += f"Frontend Request IDs: {error_info['request_ids']}\n"
+                    context += f"前端Request ID: {error_info['request_ids']}\n"
                 
-                context += f"Frontend Message: {error_info['message']}\n"
+                context += f"前端消息: {error_info['message']}\n"
                 
                 # Add backend correlations (distilled to verbose content only)
                 if error_info['backend_correlations']:
-                    context += f"Backend Correlations ({len(error_info['backend_correlations'])}):\n"
+                    context += f"后端关联 ({len(error_info['backend_correlations'])}):\n"
                     for j, backend_corr in enumerate(error_info['backend_correlations'], 1):
                         # Extract verbose message content from JSON structure
                         verbose_message = self._extract_verbose_message(backend_corr['message'])
                         context += f"  {j}. {verbose_message}\n"
                 else:
-                    context += "Backend Correlations: None found\n"
+                    context += "后端关联: 未找到\n"
                 
                 context += "\n" + "-"*50 + "\n"
         else:
-            context += "\n📦 Frontend Logs: No errors detected\n"
+            context += "\n前端日志: 未检测到错误\n"
         
         return context
     
@@ -190,48 +190,48 @@ class GPTAgent:
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt for GPT analysis"""
-        return """You are an expert software engineer specializing in mobile app debugging and user feedback analysis. 
+        return """你是一位专业的软件工程师，专门从事移动应用调试和用户反馈分析。请用中文进行分析，但保留英文技术术语、框架名称和应用名称。
 
-Your task is to analyze user reports along with frontend-backend log correlations to determine:
-1. Whether the user feedback indicates a bug, feature request, or neither
-2. If it's a bug, identify the most likely root cause based on the correlated logs
-3. If it's a feature request, identify any technical limitations shown in the logs
-4. Provide actionable recommendations
+你的任务是分析用户报告以及前端-后端日志关联，以确定：
+1. 用户反馈是否表明是bug、功能请求或其他
+2. 如果是bug，基于关联日志识别最可能的根本原因
+3. 如果是功能请求，识别日志中显示的任何技术限制
+4. 提供可操作的建议
 
-Respond with a JSON object in this exact format:
+请使用以下精确格式的JSON对象回复：
 {
   "issue_type": "bug|feature_request|neither",
   "confidence": 0.0-1.0,
-  "root_cause": "detailed explanation if bug, null otherwise",
-  "related_limitations": "technical limitations if feature request, null otherwise", 
-  "recommendations": ["actionable recommendation 1", "actionable recommendation 2"],
-  "summary": "brief 2-3 sentence summary of your analysis"
+  "root_cause": "如果是bug则详细解释，否则为null",
+  "related_limitations": "如果是功能请求则说明技术限制，否则为null", 
+  "recommendations": ["可操作的建议1", "可操作的建议2"],
+  "summary": "分析的简要2-3句总结"
 }
 
-Consider these factors:
-- User language and context clues
-- Error patterns and frequency
-- Request ID correlations and timing relationships
-- Platform-specific issues
-- App version compatibility
-- Backend service availability
-- Correlation method confidence (request_id_match only)
+考虑以下因素：
+- 用户语言和上下文线索
+- 错误模式和频率
+- Request ID关联和时序关系
+- 平台特定问题
+- App版本兼容性
+- Backend服务可用性
+- 关联方法置信度（仅request_id_match）
 
-Be concise but thorough. Focus on actionable insights."""
+要简洁但全面。专注于可操作的见解。"""
     
     def _get_user_prompt(self, context: str) -> str:
         """Get the user prompt with context"""
-        return f"""Please analyze this user report and associated frontend-backend log correlations:
+        return f"""请分析以下用户报告和相关的前端-后端日志关联：
 
 {context}
 
-🎯 Analysis Tasks:
-1. Is this user feedback a feature request, bug report, or neither?
-2. If it's a bug, what is the most likely technical issue based on the correlated logs?
-3. If it's a feature request, are there any technical limitations visible in the logs?
-4. What are your specific recommendations for addressing this?
+分析任务：
+1. 此用户反馈是功能请求、bug报告还是其他？
+2. 如果是bug，基于关联日志最可能的技术问题是什么？
+3. 如果是功能请求，日志中是否显示任何技术限制？
+4. 你对解决此问题有什么具体建议？
 
-Please provide your analysis in the requested JSON format."""
+请以要求的JSON格式提供你的分析。"""
     
     def _parse_gpt_response(self, response_text: str) -> AnalysisResult:
         """Parse GPT response into AnalysisResult object"""

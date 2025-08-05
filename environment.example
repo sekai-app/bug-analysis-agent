@@ -11,6 +11,10 @@ AWS_ACCESS_KEY_ID=your_aws_access_key_here
 AWS_SECRET_ACCESS_KEY=your_aws_secret_key_here
 CLOUDWATCH_LOG_GROUP=/aws/lambda/your-backend-service
 
+# S3 Configuration (optional, for CSV report storage)
+S3_BUCKET_NAME=bug-analysis-agent-report
+S3_ENABLED=true
+
 # Webhook Configuration (optional, for sending analysis results)
 WEBHOOK_ENABLED=false
 WEBHOOK_URL=https://your-webhook-endpoint.com/analysis-complete

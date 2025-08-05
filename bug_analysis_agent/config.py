@@ -23,6 +23,10 @@ class Config:
     AWS_SECRET_ACCESS_KEY: Optional[str] = os.getenv('AWS_SECRET_ACCESS_KEY')
     CLOUDWATCH_LOG_GROUP: Optional[str] = os.getenv('CLOUDWATCH_LOG_GROUP')
     
+    # S3 Configuration
+    S3_BUCKET_NAME: str = os.getenv('S3_BUCKET_NAME')
+    S3_ENABLED: bool = os.getenv('S3_ENABLED', 'true').lower() == 'true'
+    
     # Webhook Configuration
     WEBHOOK_URL: Optional[str] = os.getenv('WEBHOOK_URL')
     WEBHOOK_TIMEOUT: int = int(os.getenv('WEBHOOK_TIMEOUT', '30'))
@@ -54,6 +58,11 @@ class Config:
             os.getenv('AWS_CONTAINER_CREDENTIALS_RELATIVE_URI') or
             os.getenv('AWS_EC2_METADATA_DISABLED') == 'true'
         )
+    
+    @classmethod
+    def is_s3_configured(cls) -> bool:
+        """Check if S3 is properly configured"""
+        return cls.is_aws_configured() and cls.S3_ENABLED and cls.S3_BUCKET_NAME
     
     @classmethod
     def is_webhook_configured(cls) -> bool:

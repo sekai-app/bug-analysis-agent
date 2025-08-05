@@ -6,7 +6,7 @@ FastAPI backend for Bug Analysis Agent
 import logging
 import asyncio
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
@@ -14,10 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 import os
+from typing import List
 
 from bug_analysis_agent.analyzer import BugAnalyzer
 from bug_analysis_agent.config import Config
 from bug_analysis_agent.webhook import WebhookSender
+from bug_analysis_agent.lark_parser import LarkPayloadParser
 
 
 # Request/Response Models
@@ -44,6 +46,7 @@ class AnalysisResponse(BaseModel):
     csv_file: Optional[str] = None
     created_at: datetime
     completed_at: Optional[datetime] = None
+    original_content: Optional[str] = None  # Store original Lark content for webhook
 
 
 class HealthResponse(BaseModel):
@@ -52,16 +55,76 @@ class HealthResponse(BaseModel):
     timestamp: datetime
 
 
+# Lark Webhook Models
+class LarkTextContent(BaseModel):
+    tag: str
+    content: str
+
+class LarkTitle(BaseModel):
+    tag: str
+    content: str
+
+class LarkHeader(BaseModel):
+    title: LarkTitle
+
+class LarkConfig(BaseModel):
+    wide_screen_mode: bool
+
+class LarkElement(BaseModel):
+    tag: str
+    text: Optional[LarkTextContent] = None
+
+class LarkCard(BaseModel):
+    config: Optional[LarkConfig] = None
+    header: Optional[LarkHeader] = None
+    elements: List[LarkElement]
+
+class LarkWebhookPayload(BaseModel):
+    msg_type: str
+    card: LarkCard
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "msg_type": "interactive",
+                "card": {
+                    "config": {
+                        "wide_screen_mode": True
+                    },
+                    "header": {
+                        "title": {
+                            "tag": "plain_text",
+                            "content": "Sekai 日志上报"
+                        }
+                    },
+                    "elements": [
+                        {
+                            "tag": "div",
+                            "text": {
+                                "tag": "lark_md",
+                                "content": "用户提交日志!\n下载地址: https://example.com/log.txt\n环境: prod\n版本号: 1.0.0\n上传用户: user123 @John Doe\n系统：ios\n系统版本：iOS 15.0\n\n反馈内容: App crashes when opening camera"
+                            }
+                        },
+                        {
+                            "tag": "hr"
+                        }
+                    ]
+                }
+            }
+        }
+
+
 # Global analyzer instance
 analyzer = None
 webhook_sender = None
+lark_parser = None
 analysis_jobs = {}  # Store analysis jobs by ID
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup analyzer"""
-    global analyzer, webhook_sender
+    global analyzer, webhook_sender, lark_parser
     
     # Setup logging
     logging.basicConfig(
@@ -89,6 +152,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"Failed to initialize webhook sender: {e}")
         webhook_sender = None
+    
+    # Initialize Lark parser
+    try:
+        lark_parser = LarkPayloadParser()
+        logging.info("Lark parser initialized successfully")
+    except Exception as e:
+        logging.error(f"Failed to initialize Lark parser: {e}")
+        lark_parser = None
     
     yield
     
@@ -225,7 +296,8 @@ async def analyze_sync(request: AnalysisRequest):
                     csv_file=csv_file_path,
                     user_id=request.user_id,
                     created_at=created_at,
-                    completed_at=completed_at
+                    completed_at=completed_at,
+                    original_content=None  # Not available for direct API calls
                 )
             except Exception as e:
                 logging.warning(f"Failed to send webhook for analysis {analysis_id}: {e}")
@@ -251,7 +323,8 @@ async def analyze_sync(request: AnalysisRequest):
                     error=str(e),
                     user_id=request.user_id,
                     created_at=created_at,
-                    completed_at=completed_at
+                    completed_at=completed_at,
+                    original_content=None  # Not available for direct API calls
                 )
             except Exception as webhook_error:
                 logging.warning(f"Failed to send webhook for failed analysis {analysis_id}: {webhook_error}")
@@ -306,7 +379,13 @@ async def run_analysis(analysis_id: str, report_data: Dict[str, Any]):
                 request_id_context_lines=report_data.get('request_id_context_lines', 5),
                 time_window_minutes=report_data.get('time_window_minutes', 10)  # 10 minutes default
             )
-            result = analyzer.format_analysis_summary(triage_report)
+            
+            # Use concise format for webhooks with original content to avoid redundancy
+            if analysis_jobs[analysis_id].original_content:
+                result = analyzer.format_concise_analysis(triage_report)
+            else:
+                result = analyzer.format_analysis_summary(triage_report)
+            
             csv_file_path = analyzer.export_correlations_to_csv(triage_report)
         else:
             result = analyzer.quick_analyze(report_data, generate_csv=False)
@@ -328,7 +407,8 @@ async def run_analysis(analysis_id: str, report_data: Dict[str, Any]):
                     csv_file=csv_file_path,
                     user_id=report_data.get('user_id'),
                     created_at=analysis_jobs[analysis_id].created_at,
-                    completed_at=analysis_jobs[analysis_id].completed_at
+                    completed_at=analysis_jobs[analysis_id].completed_at,
+                    original_content=analysis_jobs[analysis_id].original_content
                 )
             except Exception as e:
                 logging.warning(f"Failed to send webhook for analysis {analysis_id}: {e}")
@@ -348,7 +428,8 @@ async def run_analysis(analysis_id: str, report_data: Dict[str, Any]):
                     error=str(e),
                     user_id=report_data.get('user_id'),
                     created_at=analysis_jobs[analysis_id].created_at,
-                    completed_at=analysis_jobs[analysis_id].completed_at
+                    completed_at=analysis_jobs[analysis_id].completed_at,
+                    original_content=analysis_jobs[analysis_id].original_content
                 )
             except Exception as webhook_error:
                 logging.warning(f"Failed to send webhook for failed analysis {analysis_id}: {webhook_error}")
@@ -371,6 +452,71 @@ async def download_csv(filename: str):
         filename=filename,
         media_type='text/csv'
     )
+
+
+@app.post("/webhook/lark")
+async def lark_webhook(payload: LarkWebhookPayload, background_tasks: BackgroundTasks):
+    """Endpoint to receive Lark webhook payloads and trigger analysis"""
+    try:
+        # Convert Pydantic model to dict for processing
+        payload_dict = payload.model_dump()
+        logging.info(f"Received Lark webhook payload: {payload_dict}")
+        
+        if lark_parser is None:
+            raise HTTPException(status_code=503, detail="Lark parser not initialized")
+        
+        # Parse the Lark payload
+        analysis_data = lark_parser.parse_lark_report(payload_dict)
+        if not analysis_data:
+            error_msg = "Failed to parse Lark payload - missing required fields"
+            logging.error(error_msg)
+            response = lark_parser.create_lark_response(success=False, error=error_msg)
+            return response
+        
+        # Extract original markdown content for webhook
+        original_content = None
+        try:
+            elements = payload_dict.get('card', {}).get('elements', [])
+            for element in elements:
+                if (element.get('tag') == 'div' and 
+                    element.get('text', {}).get('tag') == 'lark_md'):
+                    original_content = element.get('text', {}).get('content', '')
+                    break
+            logging.info(f"Extracted original content: {original_content}")
+        except Exception as e:
+            logging.warning(f"Could not extract original content: {e}")
+        
+        # Generate analysis ID
+        user_id = analysis_data.get('user_id', 'unknown')
+        analysis_id = f"lark_{user_id}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+        
+        # Create job entry with original content
+        analysis_jobs[analysis_id] = AnalysisResponse(
+            analysis_id=analysis_id,
+            status="running",
+            created_at=datetime.utcnow(),
+            original_content=original_content
+        )
+        
+        # Start background analysis
+        background_tasks.add_task(run_analysis, analysis_id, analysis_data)
+        
+        logging.info(f"Started analysis {analysis_id} for Lark user {user_id}")
+        
+        # Return success response in Lark format
+        response = lark_parser.create_lark_response(success=True, analysis_id=analysis_id)
+        return response
+        
+    except Exception as e:
+        error_msg = f"Webhook processing failed: {e}"
+        logging.error(error_msg)
+        
+        # Try to return Lark error format
+        if lark_parser:
+            response = lark_parser.create_lark_response(success=False, error=str(e))
+            return response
+        else:
+            raise HTTPException(status_code=500, detail=error_msg)
 
 
 @app.get("/")
