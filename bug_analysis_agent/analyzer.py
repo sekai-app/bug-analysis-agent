@@ -489,9 +489,14 @@ App版本: {report.app_version}
             for field in fieldnames:
                 value = correlation.get(field, '')
                 # Escape commas and quotes in CSV
-                if ',' in str(value) or '"' in str(value):
-                    value = f'"{str(value).replace('"', '""')}"'
-                row.append(str(value))
+                value_str = str(value)
+                if ',' in value_str or '"' in value_str:
+                    # Double the quotes and wrap in quotes
+                    escaped_value = value_str.replace('"', '""')
+                    value = f'"{escaped_value}"'
+                else:
+                    value = value_str
+                row.append(value)
             csv_content.append(','.join(row))
         
         csv_data = '\n'.join(csv_content)
