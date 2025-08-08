@@ -2,7 +2,7 @@ name: Deploy to ECS
 
 on:
   push:
-    branches: [ main ]  # Change if you deploy from a different branch
+    branches: [ main ]  # Change if needed
 
 env:
   AWS_REGION: us-east-1
@@ -40,25 +40,47 @@ jobs:
         docker build -f Dockerfile.backend -t $IMAGE_URI .
         docker push $IMAGE_URI
 
-    - name: Get current task definition
+    - name: Get and clean current task definition
       run: |
-        aws ecs describe-task-definition --task-definition $TASK_FAMILY \
+        aws ecs describe-task-definition \
+          --task-definition $TASK_FAMILY \
           --region $AWS_REGION \
-          --query taskDefinition > task-def.json
+          --query taskDefinition > full-task-def.json
 
-    - name: Update task definition with new image
+        jq '{
+          family,
+          taskRoleArn,
+          executionRoleArn,
+          networkMode,
+          containerDefinitions,
+          volumes,
+          placementConstraints,
+          requiresCompatibilities,
+          cpu,
+          memory,
+          tags,
+          pidMode,
+          ipcMode,
+          proxyConfiguration,
+          inferenceAccelerators,
+          ephemeralStorage,
+          runtimePlatform,
+          enableExecuteCommand
+        }' full-task-def.json > new-task-def.json
+
+    - name: Update container image in task definition
       run: |
         jq --arg IMAGE "${{ env.IMAGE_URI }}" \
            --arg NAME "$CONTAINER_NAME" \
            '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
-           task-def.json > new-task-def.json
+           new-task-def.json > final-task-def.json
 
     - name: Register updated task definition
       id: register-task
       run: |
         NEW_TASK_DEF=$(aws ecs register-task-definition \
           --region $AWS_REGION \
-          --cli-input-json file://new-task-def.json \
+          --cli-input-json file://final-task-def.json \
           --query 'taskDefinition.taskDefinitionArn' \
           --output text)
         echo "NEW_TASK_DEF=$NEW_TASK_DEF" >> $GITHUB_ENV
