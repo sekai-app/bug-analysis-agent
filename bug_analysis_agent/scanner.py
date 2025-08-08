@@ -16,37 +16,100 @@ class LogScanner:
     def __init__(self):
         # Define error patterns to search for - more precise matching
         self.error_patterns = [
-            # Explicit error log levels
-            (r'\[E\]', 'EXPLICIT_ERROR'),
-            (r'\[ERROR\]', 'LOG_ERROR'),
-            (r'\[FATAL\]', 'LOG_FATAL'),
-            (r'\[CRITICAL\]', 'LOG_CRITICAL'),
-            
-            # JavaScript/Programming errors (specific types)
-            (r'\bRangeError\b', 'RANGE_ERROR'),
-            (r'\bTypeError\b', 'TYPE_ERROR'), 
-            (r'\bReferenceError\b', 'REFERENCE_ERROR'),
-            (r'\bSyntaxError\b', 'SYNTAX_ERROR'),
-            (r'\bNetworkError\b', 'NETWORK_ERROR'),
-            
-            # Exception patterns (must have colon or be standalone)
-            (r'\bException:', 'EXCEPTION'),
-            (r'^Exception\b', 'EXCEPTION'),
-            (r'\bError:', 'ERROR_MESSAGE'),
-            (r'^Error\b', 'ERROR_MESSAGE'),
-            
-            # Critical system messages
-            (r'\bFATAL\b', 'FATAL'),
-            (r'\bCRITICAL\b', 'CRITICAL'),
-            (r'\bcrash\b', 'CRASH'),
-            (r'\bfailed to\b', 'FAILURE'),
-            
-            # Specific error phrases (not just words)
-            (r'cannot connect', 'CONNECTION_FAILURE'),
-            (r'unable to', 'UNABLE'),
-            (r'request failed', 'REQUEST_FAILURE'),
-            (r'timeout', 'TIMEOUT'),
-        ]
+        # ==== Log Levels ====
+        (r'\[E\]', 'LOG_LEVEL_ERROR'),
+        (r'\[ERROR\]', 'LOG_LEVEL_ERROR'),
+        (r'\[ERR\]', 'LOG_LEVEL_ERROR'),
+        (r'\[FATAL\]', 'LOG_LEVEL_FATAL'),
+        (r'\[CRITICAL\]', 'LOG_LEVEL_CRITICAL'),
+        (r'\[WARN(ING)?\]', 'LOG_LEVEL_WARNING'),
+
+        # ==== Programming Errors ====
+        (r'\bAssertionError\b', 'ASSERTION_ERROR'),
+        (r'\bRuntimeError\b', 'RUNTIME_ERROR'),
+        (r'\bRangeError\b', 'RANGE_ERROR'),
+        (r'\bTypeError\b', 'TYPE_ERROR'),
+        (r'\bReferenceError\b', 'REFERENCE_ERROR'),
+        (r'\bSyntaxError\b', 'SYNTAX_ERROR'),
+        (r'\bNameError\b', 'NAME_ERROR'),
+        (r'\bValueError\b', 'VALUE_ERROR'),
+        (r'\bKeyError\b', 'KEY_ERROR'),
+        (r'\bIndexError\b', 'INDEX_ERROR'),
+        (r'\bImportError\b', 'IMPORT_ERROR'),
+        (r'\bModuleNotFoundError\b', 'MODULE_NOT_FOUND'),
+
+        # ==== Exception Signatures ====
+        (r'\bException\b[:\s]', 'GENERIC_EXCEPTION'),
+        (r'\bUnhandled exception\b', 'UNHANDLED_EXCEPTION'),
+        (r'\bUncaught exception\b', 'UNCAUGHT_EXCEPTION'),
+        (r'\bCaught exception\b', 'CAUGHT_EXCEPTION'),
+        (r'\bError\b[:\s]', 'GENERIC_ERROR'),
+        (r'^Exception\b', 'GENERIC_EXCEPTION'),
+        (r'^Error\b', 'GENERIC_ERROR'),
+
+        # ==== System Failures / Crashes ====
+        (r'\bFATAL\b', 'FATAL'),
+        (r'\bCRITICAL\b', 'CRITICAL'),
+        (r'\bSEVERE\b', 'SEVERE'),
+        (r'\bPANIC\b', 'PANIC'),
+        (r'\bcrash(ed)?\b', 'CRASH'),
+        (r'\bsegmentation fault\b', 'SEGFAULT'),
+        (r'\bcore dump\b', 'CORE_DUMP'),
+        (r'\bkernel panic\b', 'KERNEL_PANIC'),
+
+        # ==== Network / API Failures ====
+        (r'\btimeout\b', 'TIMEOUT'),
+        (r'\bconnection (reset|refused|timed out|closed)\b', 'CONNECTION_ERROR'),
+        (r'\bconnect\w* failed\b', 'CONNECTION_FAILURE'),
+        (r'\brequest failed\b', 'REQUEST_FAILURE'),
+        (r'\bHTTP [45]\d\d\b', 'HTTP_ERROR'),
+        (r'\b503 Service Unavailable\b', 'SERVICE_UNAVAILABLE'),
+        (r'\b504 Gateway Timeout\b', 'GATEWAY_TIMEOUT'),
+        (r'\bnetwork error\b', 'NETWORK_ERROR'),
+        (r'\bDNS (lookup|resolution) failed\b', 'DNS_FAILURE'),
+
+        # ==== Access / Permissions ====
+        (r'\bpermission denied\b', 'PERMISSION_DENIED'),
+        (r'\baccess denied\b', 'ACCESS_DENIED'),
+        (r'\bnot authorized\b', 'UNAUTHORIZED'),
+        (r'\bunauthorized\b', 'UNAUTHORIZED'),
+
+        # ==== File System / IO ====
+        (r'\bfile not found\b', 'FILE_NOT_FOUND'),
+        (r'\bno such file or directory\b', 'FILE_NOT_FOUND'),
+        (r'\bread-only file system\b', 'READ_ONLY_FS'),
+        (r'\bdisk full\b', 'DISK_FULL'),
+        (r'\bI/O error\b', 'IO_ERROR'),
+
+        # ==== Database / Cache / Storage ====
+        (r'\bSQLSTATE\b', 'SQL_ERROR'),
+        (r'\bdatabase error\b', 'DB_ERROR'),
+        (r'\bquery failed\b', 'DB_QUERY_FAILURE'),
+        (r'\bconnection pool exhausted\b', 'DB_CONNECTION_EXHAUSTED'),
+        (r'\bredis\b.*\b(error|fail)\b', 'REDIS_ERROR'),
+
+        # ==== Authentication / Session ====
+        (r'\bauthentication failed\b', 'AUTH_FAILURE'),
+        (r'\bsession expired\b', 'SESSION_EXPIRED'),
+        (r'\btoken expired\b', 'TOKEN_EXPIRED'),
+
+        # ==== Common Failure Phrases ====
+        (r'\bfailed to\b', 'GENERIC_FAILURE'),
+        (r'\bcannot\b', 'GENERIC_FAILURE'),
+        (r'\bunable to\b', 'GENERIC_FAILURE'),
+        (r'\binvalid\b', 'INVALID_INPUT'),
+        (r'\bunexpected\b', 'UNEXPECTED'),
+        (r'\bmismatch\b', 'MISMATCH'),
+        (r'\bnull\b', 'NULL_ERROR'),
+        (r'\bundefined\b', 'UNDEFINED'),
+
+        # ==== Miscellaneous Critical Indicators ====
+        (r'\babort(ed)?\b', 'ABORT'),
+        (r'\bstack trace\b', 'STACK_TRACE'),
+        (r'\btraceback\b', 'TRACEBACK'),
+        (r'\bbug\b', 'BUG'),
+    ]
+
         
         # Compile patterns for performance
         self.compiled_patterns = [
@@ -87,7 +150,7 @@ class LogScanner:
         
         Args:
             log_content: The complete log file content
-            context_lines: Number of lines to extract before and after each error
+            context_lines: Number of lines to extract before and after each error (deprecated, not used)
             request_id_context_lines: Number of lines to scan around error for request IDs
             
         Returns:
@@ -107,7 +170,7 @@ class LogScanner:
             for pattern, error_type in self.compiled_patterns:
                 if pattern.search(line):
                     error = self._extract_error_details(
-                        lines, line_num, line, error_type, context_lines, request_id_context_lines
+                        lines, line_num, line, error_type, request_id_context_lines
                     )
                     
                     # Create a signature for deduplication
@@ -132,17 +195,9 @@ class LogScanner:
         line_num: int, 
         error_line: str, 
         error_type: str,
-        context_lines: int,
         request_id_context_lines: int = 5
     ) -> LogError:
         """Extract detailed information about an error"""
-        
-        # Extract context before and after
-        start_idx = max(0, line_num - context_lines)
-        end_idx = min(len(lines), line_num + context_lines + 1)
-        
-        context_before = lines[start_idx:line_num]
-        context_after = lines[line_num + 1:end_idx]
         
         # Extract request IDs from the error line or nearby lines
         context_lines_for_request_id = lines[max(0, line_num - request_id_context_lines):min(len(lines), line_num + request_id_context_lines + 1)]
@@ -160,8 +215,8 @@ class LogScanner:
             request_ids=request_ids,
             error_type=error_type,
             log_segment=error_line,
-            context_before=context_before,
-            context_after=context_after,
+            context_before=[],  # Not used, keep empty for backward compatibility
+            context_after=[],   # Not used, keep empty for backward compatibility
             line_number=line_num + 1  # 1-based line numbers
         )
     

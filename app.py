@@ -10,9 +10,10 @@ import time
 import os
 from datetime import datetime
 from typing import Dict, Any, Optional
+from bug_analysis_agent.config import Config
 
-# API Configuration
-API_BASE_URL = "http://localhost:8000"
+# Configuration
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 # API_BASE_URL = "http://3.238.204.247:8000"
 
 
@@ -232,11 +233,9 @@ def main():
             st.subheader("Analysis Options")
             col3, col4 = st.columns(2)
             with col3:
-                context_lines = st.number_input("Context Lines", min_value=1, max_value=50, value=10, 
-                                              help="Number of log lines to include around each error for general context")
-                request_id_context_lines = st.number_input("Request ID Context Lines", min_value=1, max_value=50, value=5,
+                request_id_context_lines = st.number_input("Request ID Context Lines", min_value=1, max_value=50, value=Config.DEFAULT_REQUEST_ID_CONTEXT_LINES,
                                                           help="Number of lines to scan around errors for request IDs")
-                time_window = st.number_input("Time Window (minutes)", min_value=1, max_value=2880, value=10,  # 10 minutes default
+                time_window = st.number_input("Time Window (minutes)", min_value=1, max_value=2880, value=Config.DEFAULT_TIME_WINDOW_MINUTES,
                                             help="Time window for correlating backend logs")
             with col4:
                 generate_csv = st.checkbox("Generate CSV Report", value=True, 
@@ -262,7 +261,6 @@ def main():
                 "log_url": log_url,
                 "env": env,
                 "feedback": feedback,
-                "context_lines": context_lines,
                 "request_id_context_lines": request_id_context_lines,
                 "time_window_minutes": time_window,
                 "generate_csv": generate_csv

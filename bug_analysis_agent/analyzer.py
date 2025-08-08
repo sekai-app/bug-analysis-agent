@@ -70,10 +70,9 @@ class BugAnalyzer:
     def analyze_report(
         self,
         report_data: Dict[str, Any],
-        context_lines: int = 10,
-        request_id_context_lines: int = 5,
+        request_id_context_lines: Optional[int] = None,
         cloudwatch_log_group: Optional[str] = None,
-        time_window_minutes: int = 10,  # 10 minutes default
+        time_window_minutes: Optional[int] = None,
         max_correlations_per_error: int = 3
     ) -> TriageReport:
         """
@@ -81,16 +80,24 @@ class BugAnalyzer:
         
         Args:
             report_data: Dictionary containing user report data
-            context_lines: Number of lines to extract around each error
-            request_id_context_lines: Number of lines to scan around error for request IDs
+            request_id_context_lines: Number of lines to scan around error for request IDs (uses config default if None)
             cloudwatch_log_group: Override default CloudWatch log group
-            time_window_minutes: Time window for backend log correlation
+            time_window_minutes: Time window for backend log correlation (uses config default if None)
+            max_correlations_per_error: Maximum correlations to keep per frontend error
             
         Returns:
             Complete TriageReport with analysis
         """
         
+        # Use config defaults if not provided
+        if request_id_context_lines is None:
+            request_id_context_lines = Config.DEFAULT_REQUEST_ID_CONTEXT_LINES
+        if time_window_minutes is None:
+            time_window_minutes = Config.DEFAULT_TIME_WINDOW_MINUTES
+        
         logger.info(f"Starting analysis for user {report_data.get('user_id', 'unknown')}")
+        logger.info(f"Using request ID context lines: {request_id_context_lines}")
+        logger.info(f"Using time window: ±{time_window_minutes} minutes")
         
         # Step 1: Parse user report
         try:
@@ -110,7 +117,7 @@ class BugAnalyzer:
         
         # Step 3: Scan for errors
         try:
-            frontend_errors = self.scanner.scan_for_errors(log_content, context_lines, request_id_context_lines)
+            frontend_errors = self.scanner.scan_for_errors(log_content, request_id_context_lines=request_id_context_lines)
             logger.info(f"Found {len(frontend_errors)} frontend errors")
         except Exception as e:
             logger.error(f"Error scanning logs: {e}")
@@ -134,10 +141,10 @@ class BugAnalyzer:
                 backend_logs = []
         
         # Step 5: Create correlation mappings
-        correlations = self._create_correlation_mappings(
+        correlations = self._create_direct_correlation_mappings(
             frontend_errors, 
             backend_logs,
-            global_deduplication=True
+            max_correlations_per_error=max_correlations_per_error
         )
 
         print("CORRELATIONS", correlations)
@@ -222,7 +229,7 @@ App版本: {report.app_version}
 {'='*50}
 
 问题类型: {analysis.issue_type.upper()}
-置信度: {analysis.confidence:.1%}
+
 
 总结: {analysis.summary}
 """
@@ -273,7 +280,7 @@ App版本: {report.app_version}
         analysis = triage_report.analysis
         
         summary = f"""问题类型: {analysis.issue_type.upper()}
-置信度: {analysis.confidence:.1%}
+
 
 总结: {analysis.summary}"""
         
@@ -456,10 +463,10 @@ App版本: {report.app_version}
         """
         
         # Create correlation mappings with optional global deduplication
-        correlations = self._create_correlation_mappings(
+        correlations = self._create_direct_correlation_mappings(
             triage_report.frontend_errors, 
             triage_report.backend_logs,
-            global_deduplication=global_deduplication
+            max_correlations_per_error=3
         )
         
         # Generate CSV content in memory
@@ -517,41 +524,219 @@ App版本: {report.app_version}
             # Save locally if S3 not configured
             return self._save_csv_locally(csv_data, triage_report.user_report.user_id)
     
-    def _create_correlation_mappings(
+    def _find_correlated_backends(
+        self, 
+        frontend_error: LogError, 
+        backend_logs: List[BackendLogEntry],
+        max_correlations: int = 3
+    ) -> List[tuple]:
+        """
+        Find backend logs that correlate with a frontend error
+        
+        Keeps up to max_correlations correlations per frontend error, prioritizing:
+        1. Request ID matches (highest priority)
+        2. Time proximity (closest first)
+        3. Log level (ERROR > WARN > INFO > DEBUG)
+        
+        Args:
+            frontend_error: Frontend error to find correlations for
+            backend_logs: List of backend logs to search
+            max_correlations: Maximum number of correlations to keep per frontend error
+            
+        Returns:
+            List of tuples (backend_log, correlation_info) - sorted by priority
+        """
+        correlations = []
+        
+        for backend_log in backend_logs:
+            correlation_info = self._check_correlation(frontend_error, backend_log)
+            if correlation_info:
+                correlations.append((backend_log, correlation_info))
+        
+        if not correlations:
+            return []
+        
+        # Sort correlations by priority
+        def correlation_priority(correlation_tuple):
+            backend_log, correlation_info = correlation_tuple
+            
+            # Priority 1: Correlation method (request_id_match > time_based)
+            method_priority = {
+                'request_id_match': 2,
+                'time_based': 1
+            }
+            method_score = method_priority.get(correlation_info.get('method', ''), 0)
+            
+            # Priority 2: Time proximity (smaller time diff = higher priority)
+            time_diff = correlation_info.get('time_diff_seconds', float('inf'))
+            
+            # Priority 3: Log level (ERROR > WARN > INFO > DEBUG)
+            log_level_priority = {
+                'ERROR': 4,
+                'WARN': 3, 
+                'WARNING': 3,
+                'INFO': 2,
+                'DEBUG': 1
+            }
+            
+            # Extract log level from message
+            message = backend_log.message.lower()
+            log_level = 0
+            for level, priority in log_level_priority.items():
+                if level.lower() in message:
+                    log_level = priority
+                    break
+            
+            # Return tuple for sorting (higher values = higher priority)
+            return (method_score, -time_diff, log_level)
+        
+        # Sort by priority and take top max_correlations
+        correlations.sort(key=correlation_priority, reverse=True)
+        return correlations[:max_correlations]
+    
+    def _check_correlation(
+        self, 
+        frontend_error: LogError, 
+        backend_log: BackendLogEntry
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Check if a frontend error correlates with a backend log
+        
+        Args:
+            frontend_error: Frontend error
+            backend_log: Backend log entry
+            
+        Returns:
+            Correlation info dict if correlated, None otherwise
+        """
+        # Check if any of the frontend request_ids match the backend request_id
+        if backend_log.request_id:
+            # First check new request_ids list
+            if frontend_error.request_ids and backend_log.request_id in frontend_error.request_ids:
+                return {
+                    'method': 'request_id_match',
+                    'confidence': 'high',
+                    'matched_request_id': backend_log.request_id
+                }
+            
+            # Fallback to old request_id field for backward compatibility
+            if (frontend_error.request_id and 
+                frontend_error.request_id == backend_log.request_id):
+                return {
+                    'method': 'request_id_match',
+                    'confidence': 'high',
+                    'matched_request_id': backend_log.request_id
+                }
+        
+        # If no request ID match, try time-based correlation
+        if frontend_error.timestamp and backend_log.timestamp:
+            from bug_analysis_agent.cloudwatch import CloudWatchFinder
+            cloudwatch = CloudWatchFinder()
+            frontend_time = cloudwatch._parse_timestamp(frontend_error.timestamp)
+            
+            print(f"DEBUG: Frontend timestamp: {frontend_error.timestamp} -> {frontend_time}")
+            print(f"DEBUG: Backend timestamp: {backend_log.timestamp}")
+            
+            if frontend_time:
+                # Convert frontend time to UTC (assuming it's in EDT/EST timezone)
+                # Frontend logs appear to be in UTC-4 (EDT) timezone
+                from datetime import timedelta
+                frontend_utc = frontend_time + timedelta(hours=4)  # Convert to UTC
+                print(f"DEBUG: Frontend time (UTC): {frontend_utc}")
+                
+                time_diff = abs((backend_log.timestamp - frontend_utc).total_seconds())
+                print(f"DEBUG: Time difference: {time_diff} seconds")
+                # Consider logs within config-defined time window as correlated
+                time_window_seconds = Config.DEFAULT_TIME_WINDOW_MINUTES * 60
+                if time_diff <= time_window_seconds:
+                    print(f"DEBUG: Time-based correlation found! Diff: {time_diff}s")
+                    return {
+                        'method': 'time_based',
+                        'confidence': 'medium',
+                        'time_diff_seconds': time_diff
+                    }
+                else:
+                    print(f"DEBUG: Time difference too large: {time_diff}s > {time_window_seconds}s")
+            else:
+                print(f"DEBUG: Could not parse frontend timestamp: {frontend_error.timestamp}")
+        
+        return None
+    
+    def _find_time_based_backends(self, frontend_error: LogError, backend_logs: List[BackendLogEntry]) -> List[BackendLogEntry]:
+        """Find backend logs that occurred near the same time as frontend error (without request ID match)"""
+        if not frontend_error.timestamp:
+            return []
+        
+        # Parse frontend timestamp
+        from bug_analysis_agent.cloudwatch import CloudWatchFinder
+        cloudwatch = CloudWatchFinder()
+        frontend_time = cloudwatch._parse_timestamp(frontend_error.timestamp)
+        if not frontend_time:
+            return []
+        
+        # Find backend logs within reasonable time window (±10 minutes)
+        time_based_logs = []
+        from datetime import timedelta
+        
+        for backend_log in backend_logs:
+            if backend_log.timestamp:
+                time_diff = abs((backend_log.timestamp - frontend_time).total_seconds())
+                # Include backend logs within config-defined time window of frontend error
+                time_window_seconds = Config.DEFAULT_TIME_WINDOW_MINUTES * 60
+                if time_diff <= time_window_seconds:
+                    time_based_logs.append(backend_log)
+        
+        # Sort by time proximity (closest first)
+        time_based_logs.sort(key=lambda log: abs((log.timestamp - frontend_time).total_seconds()))
+        
+        # Return up to 3 closest backend logs to avoid overwhelming CSV
+        return time_based_logs[:3]
+    
+    def _calculate_time_diff(self, frontend_error: LogError, backend_log: BackendLogEntry) -> str:
+        """Calculate time difference between frontend error and backend log"""
+        if not frontend_error.timestamp or not backend_log.timestamp:
+            return ''
+        
+        from bug_analysis_agent.cloudwatch import CloudWatchFinder
+        cloudwatch = CloudWatchFinder()
+        frontend_time = cloudwatch._parse_timestamp(frontend_error.timestamp)
+        if not frontend_time:
+            return ''
+        
+        time_diff = (backend_log.timestamp - frontend_time).total_seconds()
+        return f"{time_diff:.1f}"
+    
+    def _create_direct_correlation_mappings(
         self, 
         frontend_errors: List[LogError], 
         backend_logs: List[BackendLogEntry],
-        global_deduplication: bool = True
+        max_correlations_per_error: int = 3
     ) -> List[Dict[str, Any]]:
         """
-        Create correlation mappings between frontend and backend logs
+        Create direct correlation mappings between frontend and backend logs
+        Each frontend error gets mapped to its correlating backend logs directly
         
         Args:
             frontend_errors: List of frontend errors
             backend_logs: List of backend logs
-            global_deduplication: If True, deduplicate backend messages globally across all frontend errors
+            max_correlations_per_error: Maximum correlations to keep per frontend error
             
         Returns:
             List of correlation dictionaries
         """
         correlations = []
-        global_backend_seen = set() if global_deduplication else None
         
         for frontend_error in frontend_errors:
             # Find correlating backend logs for this frontend error
-            correlated_backends = self._find_correlated_backends(frontend_error, backend_logs)
+            correlated_backends = self._find_correlated_backends(
+                frontend_error, 
+                backend_logs,
+                max_correlations=max_correlations_per_error
+            )
             
             if correlated_backends:
                 # Create a row for each correlated backend log
                 for backend_log, correlation_info in correlated_backends:
-                    
-                    # Global deduplication check
-                    if global_deduplication:
-                        backend_id = self._create_backend_log_id(backend_log)
-                        if backend_id in global_backend_seen:
-                            continue  # Skip this duplicate
-                        global_backend_seen.add(backend_id)
-                    
                     correlation = {
                         'frontend_line_number': frontend_error.line_number,
                         'frontend_timestamp': frontend_error.timestamp or '',
@@ -575,13 +760,6 @@ App版本: {report.app_version}
                 if time_based_backends:
                     # Create entries for backend logs found in time window (even without request ID match)
                     for backend_log in time_based_backends:
-                        # Global deduplication check
-                        if global_deduplication:
-                            backend_id = self._create_backend_log_id(backend_log)
-                            if backend_id in global_backend_seen:
-                                continue  # Skip this duplicate
-                            global_backend_seen.add(backend_id)
-                        
                         correlation = {
                             'frontend_line_number': frontend_error.line_number,
                             'frontend_timestamp': frontend_error.timestamp or '',
@@ -618,165 +796,6 @@ App版本: {report.app_version}
                     correlations.append(correlation)
         
         return correlations
-    
-    def _find_correlated_backends(
-        self, 
-        frontend_error: LogError, 
-        backend_logs: List[BackendLogEntry]
-    ) -> List[tuple]:
-        """
-        Find backend logs that correlate with a frontend error (with deduplication)
-        
-        Deduplication: Backend logs with same message field will only appear once
-        per frontend error, keeping the correlation with highest priority.
-        
-        Args:
-            frontend_error: Frontend error to find correlations for
-            backend_logs: List of backend logs to search
-            
-        Returns:
-            List of tuples (backend_log, correlation_info) - deduplicated by message field
-        """
-        # Use dict to store best correlation for each unique backend log
-        best_correlations = {}
-        
-        for backend_log in backend_logs:
-            correlation_info = self._check_correlation(frontend_error, backend_log)
-            if correlation_info:
-                # Create unique identifier for backend log
-                backend_id = self._create_backend_log_id(backend_log)
-                
-                # Keep the correlation with highest confidence
-                if (backend_id not in best_correlations or 
-                    self._is_better_correlation(correlation_info, best_correlations[backend_id][1])):
-                    best_correlations[backend_id] = (backend_log, correlation_info)
-        
-        return list(best_correlations.values())
-    
-    def _check_correlation(
-        self, 
-        frontend_error: LogError, 
-        backend_log: BackendLogEntry
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Check if a frontend error correlates with a backend log
-        
-        Args:
-            frontend_error: Frontend error
-            backend_log: Backend log entry
-            
-        Returns:
-            Correlation info dict if correlated, None otherwise
-        """
-        # Check if any of the frontend request_ids match the backend request_id
-        if backend_log.request_id:
-            # First check new request_ids list
-            if frontend_error.request_ids and backend_log.request_id in frontend_error.request_ids:
-                return {
-                    'method': 'request_id_match',
-                    'confidence': 'high',
-                    'matched_request_id': backend_log.request_id
-                }
-            
-            # Fallback to old request_id field for backward compatibility
-            if (frontend_error.request_id and 
-                frontend_error.request_id == backend_log.request_id):
-                return {
-                    'method': 'request_id_match',
-                    'confidence': 'high',
-                    'matched_request_id': backend_log.request_id
-                }
-        
-        return None
-    
-    def _create_backend_log_id(self, backend_log: BackendLogEntry) -> str:
-        """
-        Create a unique identifier for backend log deduplication using message field
-        
-        Args:
-            backend_log: Backend log entry
-            
-        Returns:
-            The message field as deduplication key (normalized)
-        """
-        # Use the backend_log.message as the deduplication key
-        # Normalize to handle invisible characters and whitespace differences
-        message = backend_log.message
-        
-        # Strip all types of whitespace and normalize
-        normalized = ' '.join(message.split())
-        
-        return normalized
-    
-    def _is_better_correlation(self, new_correlation: Dict[str, Any], existing_correlation: Dict[str, Any]) -> bool:
-        """
-        Determine if a new correlation is better than an existing one
-        
-        Args:
-            new_correlation: New correlation info
-            existing_correlation: Existing correlation info
-            
-        Returns:
-            True if new correlation is better, False otherwise
-        """
-        # Define correlation method priority (higher = better)
-        priority_map = {
-            'request_id_match': 1,          # Only priority - exact match
-        }
-        
-        new_priority = priority_map.get(new_correlation.get('method', ''), 0)
-        existing_priority = priority_map.get(existing_correlation.get('method', ''), 0)
-        
-        # If same priority, prefer the one with smaller time difference
-        if new_priority == existing_priority:
-            new_time_diff = new_correlation.get('time_diff_seconds', float('inf'))
-            existing_time_diff = existing_correlation.get('time_diff_seconds', float('inf'))
-            return new_time_diff < existing_time_diff
-        
-        return new_priority > existing_priority
-    
-    def _find_time_based_backends(self, frontend_error: LogError, backend_logs: List[BackendLogEntry]) -> List[BackendLogEntry]:
-        """Find backend logs that occurred near the same time as frontend error (without request ID match)"""
-        if not frontend_error.timestamp:
-            return []
-        
-        # Parse frontend timestamp
-        from bug_analysis_agent.cloudwatch import CloudWatchFinder
-        cloudwatch = CloudWatchFinder()
-        frontend_time = cloudwatch._parse_timestamp(frontend_error.timestamp)
-        if not frontend_time:
-            return []
-        
-        # Find backend logs within reasonable time window (±5 minutes)
-        time_based_logs = []
-        from datetime import timedelta
-        
-        for backend_log in backend_logs:
-            if backend_log.timestamp:
-                time_diff = abs((backend_log.timestamp - frontend_time).total_seconds())
-                # Include backend logs within 5 minutes of frontend error
-                if time_diff <= 300:  # 5 minutes = 300 seconds
-                    time_based_logs.append(backend_log)
-        
-        # Sort by time proximity (closest first)
-        time_based_logs.sort(key=lambda log: abs((log.timestamp - frontend_time).total_seconds()))
-        
-        # Return up to 3 closest backend logs to avoid overwhelming CSV
-        return time_based_logs[:3]
-    
-    def _calculate_time_diff(self, frontend_error: LogError, backend_log: BackendLogEntry) -> str:
-        """Calculate time difference between frontend error and backend log"""
-        if not frontend_error.timestamp or not backend_log.timestamp:
-            return ''
-        
-        from bug_analysis_agent.cloudwatch import CloudWatchFinder
-        cloudwatch = CloudWatchFinder()
-        frontend_time = cloudwatch._parse_timestamp(frontend_error.timestamp)
-        if not frontend_time:
-            return ''
-        
-        time_diff = (backend_log.timestamp - frontend_time).total_seconds()
-        return f"{time_diff:.1f}"
     
     def _create_fallback_analysis(self, user_report, correlations):
         """Create a simple fallback analysis when GPT is unavailable"""

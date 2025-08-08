@@ -5,24 +5,25 @@ Lark payload parser for incoming webhook reports
 import re
 import logging
 from typing import Dict, Any, Optional
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
 
 class LarkPayloadParser:
-    """Parser for Lark interactive card payloads"""
+    """Parse Lark webhook payloads and extract analysis data"""
     
     def __init__(self):
-        """Initialize the parser with regex patterns"""
-        # Regex patterns to extract data from Lark markdown content
+        # Define patterns for extracting information from Lark markdown content
         self.patterns = {
-            'log_url': r'下载地址:\s*(\S+)',
-            'environment': r'环境:\s*(\S+)',
-            'version': r'版本号:\s*(\S+)',
-            'user_info': r'上传用户:\s*(\S+)\s*@(\S+)',
-            'platform': r'系统[：:]\s*(\S+)',
-            'os_version': r'系统版本[：:]\s*([^\n]+)',
-            'feedback': r'反馈内容:\s*(.+?)(?:\n|$)'
+            'log_url': r'下载地址:\s*(https?://[^\s\n]+)',
+            'user_id': r'上传用户:\s*(\w+)\s*@',
+            'username': r'上传用户:\s*\w+\s*@([^\n]+)',
+            'platform': r'系统：(\w+)',
+            'os_version': r'系统版本：([^\n]+)',
+            'version': r'版本号:\s*([^\n]+)',
+            'environment': r'环境:\s*(\w+)',
+            'feedback': r'反馈内容:\s*(.+)',
         }
     
     def parse_lark_report(self, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -122,10 +123,13 @@ class LarkPayloadParser:
                 extracted['version'] = version_match.group(1).strip()
             
             # Extract user info (user_id and username)
-            user_match = re.search(self.patterns['user_info'], content)
+            user_match = re.search(self.patterns['user_id'], content)
             if user_match:
                 extracted['user_id'] = user_match.group(1).strip()
-                extracted['username'] = user_match.group(2).strip()
+            
+            user_match = re.search(self.patterns['username'], content)
+            if user_match:
+                extracted['username'] = user_match.group(1).strip()
             
             # Extract platform
             platform_match = re.search(self.patterns['platform'], content)
@@ -170,9 +174,8 @@ class LarkPayloadParser:
                 "log_url": extracted_data.get('log_url', ''),
                 "env": extracted_data.get('environment', 'unknown'),
                 "feedback": extracted_data.get('feedback', ''),
-                "context_lines": 10,  # Default values
-                "request_id_context_lines": 5,
-                "time_window_minutes": 10,
+                "request_id_context_lines": Config.DEFAULT_REQUEST_ID_CONTEXT_LINES,
+                "time_window_minutes": Config.DEFAULT_TIME_WINDOW_MINUTES,
                 "generate_csv": True
             }
             

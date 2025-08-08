@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from botocore.exceptions import ClientError, NoCredentialsError
 from .models import LogError, BackendLogEntry
+from .config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ class CloudWatchFinder:
         self, 
         frontend_errors: List[LogError], 
         log_group: Optional[str] = None,
-        time_window_minutes: int = 10,  # 10 minutes default
+        time_window_minutes: Optional[int] = None,
         custom_query: Optional[str] = None
     ) -> List[BackendLogEntry]:
         """
@@ -50,7 +51,7 @@ class CloudWatchFinder:
         Args:
             frontend_errors: List of frontend errors to correlate
             log_group: CloudWatch log group to search (uses default if None)
-            time_window_minutes: Time window around each error to search
+            time_window_minutes: Time window around each error to search (uses config default if None)
             custom_query: Optional custom CloudWatch Insights query. Use {request_id} as placeholder
                          
                          Examples:
@@ -65,7 +66,7 @@ class CloudWatchFinder:
                          "fields @timestamp, @message, service, stack_trace | filter @message like /{request_id}/ and service = 'api-service'"
                          
                          # Search for related database operations
-                         "fields @timestamp, @message, query_time | filter @message like /{request_id}/ and @message like /database|sql|query/"
+                         "fields @timestamp, @message, query_time | filter @message like /{request_id}/ and query_time > 1000"
                          
                          # Get logs with specific response codes
                          "fields @timestamp, @message, status_code | filter @message like /{request_id}/ and status_code >= 400"
@@ -76,6 +77,10 @@ class CloudWatchFinder:
         Returns:
             List of correlating backend log entries
         """
+        # Use config default if time_window_minutes not provided
+        if time_window_minutes is None:
+            time_window_minutes = Config.DEFAULT_TIME_WINDOW_MINUTES
+        
         if not self.logs_client:
             logger.warning("CloudWatch client not available. Skipping backend correlation.")
             return []
@@ -94,6 +99,7 @@ class CloudWatchFinder:
             correlating_logs = self._find_logs_for_error(
                 error, log_group, time_window_minutes, custom_query
             )
+            print("CORRELATING LOGS!!!!!!!!!", correlating_logs)
             backend_logs.extend(correlating_logs)
         
         # Remove duplicates based on timestamp and message

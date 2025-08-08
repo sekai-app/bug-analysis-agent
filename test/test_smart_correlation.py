@@ -46,10 +46,10 @@ def test_smart_correlation():
             # Count backend correlations per frontend error
             correlations_per_error = {}
             
-            for correlation in analyzer._create_correlation_mappings(
+            for correlation in analyzer._create_direct_correlation_mappings(
                 triage_report.frontend_errors, 
                 triage_report.backend_logs,
-                global_deduplication=False  # Show actual correlations per error
+                max_correlations_per_error=limit
             ):
                 frontend_line = correlation['frontend_line_number']
                 if frontend_line not in correlations_per_error:

@@ -32,9 +32,8 @@ class AnalysisRequest(BaseModel):
     log_url: HttpUrl
     env: str
     feedback: str
-    context_lines: int = 10
-    request_id_context_lines: int = 5
-    time_window_minutes: int = 10  # 10 minutes default
+    request_id_context_lines: Optional[int] = None  # Uses config default if None
+    time_window_minutes: Optional[int] = None  # Uses config default if None
     generate_csv: bool = True
 
 
@@ -265,11 +264,11 @@ async def analyze_sync(request: AnalysisRequest):
         report_data = request.dict()
         
         # Run analysis
-        csv_file_path = None
-        if request.generate_csv:
+        generate_csv = report_data.get('generate_csv', True)
+        
+        if generate_csv:
             triage_report = analyzer.analyze_report(
                 report_data,
-                context_lines=request.context_lines,
                 request_id_context_lines=request.request_id_context_lines,
                 time_window_minutes=request.time_window_minutes
             )
@@ -278,7 +277,6 @@ async def analyze_sync(request: AnalysisRequest):
         else:
             triage_report = analyzer.analyze_report(
                 report_data,
-                context_lines=request.context_lines,
                 request_id_context_lines=request.request_id_context_lines,
                 time_window_minutes=request.time_window_minutes
             )
@@ -375,9 +373,8 @@ async def run_analysis(analysis_id: str, report_data: Dict[str, Any]):
         if generate_csv:
             triage_report = analyzer.analyze_report(
                 report_data,
-                context_lines=report_data.get('context_lines', 10),
-                request_id_context_lines=report_data.get('request_id_context_lines', 5),
-                time_window_minutes=report_data.get('time_window_minutes', 10)  # 10 minutes default
+                request_id_context_lines=report_data.get('request_id_context_lines'),  # Uses config default if None
+                time_window_minutes=report_data.get('time_window_minutes')  # Uses config default if None
             )
             
             # Use concise format for webhooks with original content to avoid redundancy

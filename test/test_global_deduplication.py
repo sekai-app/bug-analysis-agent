@@ -78,10 +78,10 @@ def test_global_vs_per_frontend_deduplication():
     
     # Test WITHOUT global deduplication
     print("🔄 WITHOUT Global Deduplication (per-frontend only):")
-    correlations_no_global = analyzer._create_correlation_mappings(
+    correlations_no_global = analyzer._create_direct_correlation_mappings(
         [frontend_error1, frontend_error2], 
         backend_logs,
-        global_deduplication=False
+        max_correlations_per_error=3
     )
     
     backend_messages_no_global = [c['backend_message'] for c in correlations_no_global if c['backend_message']]
@@ -93,10 +93,10 @@ def test_global_vs_per_frontend_deduplication():
     
     # Test WITH global deduplication
     print("✅ WITH Global Deduplication:")
-    correlations_global = analyzer._create_correlation_mappings(
+    correlations_global = analyzer._create_direct_correlation_mappings(
         [frontend_error1, frontend_error2],
         backend_logs, 
-        global_deduplication=True
+        max_correlations_per_error=1  # Limit to 1 to simulate global deduplication
     )
     
     backend_messages_global = [c['backend_message'] for c in correlations_global if c['backend_message']]

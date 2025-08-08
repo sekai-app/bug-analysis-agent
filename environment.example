@@ -22,8 +22,8 @@ WEBHOOK_TIMEOUT=30
 WEBHOOK_RETRIES=3
 
 # Analysis Configuration
-DEFAULT_CONTEXT_LINES=10
-DEFAULT_TIME_WINDOW_MINUTES=10
+DEFAULT_REQUEST_ID_CONTEXT_LINES=5  # Lines to scan for request IDs
+DEFAULT_TIME_WINDOW_MINUTES=10  # Time window for backend log correlation (minutes)
 LOG_DOWNLOAD_TIMEOUT=30
 
 # Logging

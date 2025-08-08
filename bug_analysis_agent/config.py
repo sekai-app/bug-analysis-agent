@@ -34,8 +34,8 @@ class Config:
     WEBHOOK_ENABLED: bool = os.getenv('WEBHOOK_ENABLED', 'false').lower() == 'true'
     
     # Analysis Configuration
-    DEFAULT_CONTEXT_LINES: int = int(os.getenv('DEFAULT_CONTEXT_LINES', '10'))
-    DEFAULT_TIME_WINDOW_MINUTES: int = int(os.getenv('DEFAULT_TIME_WINDOW_MINUTES', '120'))  # 24 hours
+    DEFAULT_REQUEST_ID_CONTEXT_LINES: int = int(os.getenv('DEFAULT_REQUEST_ID_CONTEXT_LINES', '5'))
+    DEFAULT_TIME_WINDOW_MINUTES: int = int(os.getenv('DEFAULT_TIME_WINDOW_MINUTES', '10'))  # 10 minutes default
     LOG_DOWNLOAD_TIMEOUT: int = int(os.getenv('LOG_DOWNLOAD_TIMEOUT', '30'))
     
     # Logging Configuration
@@ -80,7 +80,7 @@ class Config:
             'aws_region': cls.AWS_REGION,
             'cloudwatch_log_group': cls.CLOUDWATCH_LOG_GROUP,
             'webhook_enabled': cls.WEBHOOK_ENABLED,
-            'context_lines': cls.DEFAULT_CONTEXT_LINES,
+            'request_id_context_lines': cls.DEFAULT_REQUEST_ID_CONTEXT_LINES,
             'time_window_minutes': cls.DEFAULT_TIME_WINDOW_MINUTES,
             'log_level': cls.LOG_LEVEL
         } 
