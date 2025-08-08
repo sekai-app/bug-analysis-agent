@@ -66,7 +66,8 @@ jobs:
           ephemeralStorage,
           runtimePlatform,
           enableExecuteCommand
-        }' full-task-def.json > new-task-def.json
+        } | with_entries(select(.value != null))' full-task-def.json > new-task-def.json
+
 
     - name: Update container image in task definition
       run: |
