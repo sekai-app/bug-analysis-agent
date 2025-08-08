@@ -41,31 +41,33 @@ jobs:
         docker push $IMAGE_URI
 
     - name: Get current task definition
-      id: task-def
       run: |
         aws ecs describe-task-definition --task-definition $TASK_FAMILY \
           --region $AWS_REGION \
           --query taskDefinition > task-def.json
 
     - name: Update task definition with new image
-      id: update-task-def
       run: |
-        NEW_IMAGE="${{ env.IMAGE_URI }}"
-        jq --arg IMAGE "$NEW_IMAGE" \
+        jq --arg IMAGE "${{ env.IMAGE_URI }}" \
            --arg NAME "$CONTAINER_NAME" \
            '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)' \
            task-def.json > new-task-def.json
 
-        echo "NEW_TASK_DEF=$(aws ecs register-task-definition \
+    - name: Register updated task definition
+      id: register-task
+      run: |
+        NEW_TASK_DEF=$(aws ecs register-task-definition \
           --region $AWS_REGION \
           --cli-input-json file://new-task-def.json \
-          --query 'taskDefinition.taskDefinitionArn' --output text)" >> $GITHUB_ENV
+          --query 'taskDefinition.taskDefinitionArn' \
+          --output text)
+        echo "NEW_TASK_DEF=$NEW_TASK_DEF" >> $GITHUB_ENV
 
     - name: Deploy updated task definition to ECS
       run: |
         aws ecs update-service \
           --cluster $ECS_CLUSTER \
           --service $ECS_SERVICE \
-          --task-definition $NEW_TASK_DEF \
+          --task-definition ${{ env.NEW_TASK_DEF }} \
           --force-new-deployment \
           --region $AWS_REGION
