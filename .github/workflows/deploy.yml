@@ -37,7 +37,7 @@ jobs:
         IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:latest"
         echo "IMAGE_URI=${IMAGE_URI}" >> $GITHUB_ENV
 
-        docker build -t $IMAGE_URI .
+        docker build -f Dockerfile.backend -t $IMAGE_URI .
         docker push $IMAGE_URI
 
     - name: Get current task definition
